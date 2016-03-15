@@ -1,40 +1,43 @@
-import numpy as np
+import logging
 import theano
 from theano import tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 from layers import MultiLayer, Merger
-from optimizer import rmsprop
+from optimizer import Model, rmsprop
 from training import train
 
 floatX = theano.config.floatX
+logger = logging.getLogger(__name__)
 
 
-def build_model(xl, xr, y, learning_rate,
-                input_dim_left, input_dim_right,
-                left_layer_dims, right_layer_dims, top_layer_dims,
-                merged_layer_dim):
+def merge_dicts(*dict_args):
+    result = {}
+    for dictionary in dict_args:
+        result.update(dictionary)
+    return result
 
-    f_l = MultiLayer(input_dim_left, left_layer_dims)  # left branch
-    f_r = MultiLayer(input_dim_right, right_layer_dims)  # right branch
-    f_t = MultiLayer(merged_layer_dim, top_layer_dims)  # classifier
+
+def build_model(xl, xr, y, learning_rate, linput_dim, rinput_dim, llayer_dims,
+                rlayer_dims, tlayer_dims, merged_layer_dim=None, lbranch=None,
+                rbranch=None, tbranch=None, trng=None, **kwargs):
+
+    logger.info('Building model')
+    f_l = MultiLayer(linput_dim, llayer_dims, trng=trng, **lbranch)  # left
+    f_r = MultiLayer(rinput_dim, rlayer_dims, trng=trng, **rbranch)  # right
+    f_t = MultiLayer(merged_layer_dim, tlayer_dims, trng=trng, **tbranch)
     merger = Merger(merged_layer_dim)  # merger layer
 
-    fl = f_l.fprop(xl)
-    fr = f_r.fprop(xr)
+    fl = f_l.fprop(xl, use_noise=True)
+    fr = f_r.fprop(xr, use_noise=True)
 
-    fl_only = merger.fprop([fl])
-    fr_only = merger.fprop([fr])
-    f_both = merger.fprop([fl, fr], op='sum', axis=1)
+    fl_only = merger.fprop([fl], use_noise=True)
+    fr_only = merger.fprop([fr], use_noise=True)
+    f_both = merger.fprop([fl, fr], op='sum', axis=1, use_noise=True)
 
-    # left only
-    yl_probs = T.nnet.softmax(f_t.fprop(fl_only))
-
-    # right only
-    yr_probs = T.nnet.softmax(f_t.fprop(fr_only))
-
-    # both
-    yb_probs = T.nnet.softmax(f_t.fprop(f_both))
+    yl_probs = T.nnet.softmax(f_t.fprop(fl_only, use_noise=True))
+    yr_probs = T.nnet.softmax(f_t.fprop(fr_only, use_noise=True))
+    yb_probs = T.nnet.softmax(f_t.fprop(f_both, use_noise=True))
 
     cost_l = T.nnet.categorical_crossentropy(yl_probs, y).mean()
     cost_r = T.nnet.categorical_crossentropy(yr_probs, y).mean()
@@ -44,22 +47,29 @@ def build_model(xl, xr, y, learning_rate,
     cost_r.name = 'cost_r'
     cost_b.name = 'cost_b'
 
-    params_l = f_l.get_params() + f_t.get_params() + merger.get_params()
-    params_r = f_r.get_params() + f_t.get_params() + merger.get_params()
-    params_b = f_l.get_params() + f_r.get_params() + f_t.get_params() + \
-        merger.get_params()
+    params_l = merge_dicts(f_l.get_params(),
+                           f_t.get_params(),
+                           merger.get_params())
+    params_r = merge_dicts(f_r.get_params(),
+                           f_t.get_params(),
+                           merger.get_params())
+    params_b = merge_dicts(f_l.get_params(),
+                           f_r.get_params(),
+                           f_t.get_params(),
+                           merger.get_params())
 
-    grads_l = [theano.grad(cost_l, p) for p in params_l]
-    grads_r = [theano.grad(cost_r, p) for p in params_r]
-    grads_b = [theano.grad(cost_b, p) for p in params_b]
+    logger.info('Computing gradients')
+    grads_l = [theano.grad(cost_l, p) for k, p in params_l.items()]
+    grads_r = [theano.grad(cost_r, p) for k, p in params_r.items()]
+    grads_b = [theano.grad(cost_b, p) for k, p in params_b.items()]
 
     acc_l = T.mean(T.eq(T.argmax(yl_probs, axis=1), y), dtype=floatX)
     acc_r = T.mean(T.eq(T.argmax(yr_probs, axis=1), y), dtype=floatX)
     acc_b = T.mean(T.eq(T.argmax(yb_probs, axis=1), y), dtype=floatX)
 
-    model_l = (cost_l, acc_l, params_l, grads_l)
-    model_r = (cost_r, acc_r, params_r, grads_r)
-    model_b = (cost_b, acc_b, params_b, grads_b)
+    model_l = Model(cost=cost_l, params=params_l, grads=grads_l, acc=acc_l)
+    model_r = Model(cost=cost_r, params=params_r, grads=grads_r, acc=acc_r)
+    model_b = Model(cost=cost_b, params=params_b, grads=grads_b, acc=acc_b)
 
     return model_l, model_r, model_b
 
@@ -67,9 +77,15 @@ def build_model(xl, xr, y, learning_rate,
 options = {
     'batch_size': 128,
     'nb_classes': 10,
-    'lbranch': [],
-    'rbranch': [],
-    'tbranch': []
+    'linput_dim': 392,
+    'rinput_dim': 392,
+    'llayer_dims': [512],
+    'rlayer_dims': [512],
+    'tlayer_dims': [10],
+    'merged_layer_dim': 512,
+    'lbranch': {'dropout': 0.2, 'prefix': 'left'},
+    'rbranch': {'dropout': 0.2, 'prefix': 'right'},
+    'tbranch': {'prefix': 'top'}
 }
 
 
@@ -82,30 +98,30 @@ def main():
     trng = RandomStreams(1234)
 
     # use test values
+    """
+    import numpy as np
     batch_size = 10
     theano.config.compute_test_value = 'raise'
-    xl.tag.test_value = np.random.randn(batch_size, 2).astype(floatX)
-    xr.tag.test_value = np.random.randn(batch_size, 2).astype(floatX)
+    xl.tag.test_value = np.random.randn(batch_size, 392).astype(floatX)
+    xr.tag.test_value = np.random.randn(batch_size, 392).astype(floatX)
     y.tag.test_value = np.random.randint(8, size=batch_size).astype(np.int32)
     learning_rate.tag.test_value = 0.5
-    np.random.seed(4321)
+    """
 
     # build cgs
     model_l, model_r, model_b = build_model(
-        xl, xr, y, learning_rate,
-        input_dim_left=2, input_dim_right=2,
-        left_layer_dims=[3, 4], right_layer_dims=[7, 8], top_layer_dims=[7, 4],
-        merged_layer_dim=5, trng=trng)
+        xl, xr, y, learning_rate, trng=trng,
+        **options)
 
     # compile
     f_update_l = rmsprop(learning_rate, model_l, [xl, y])
-    f_update_r = rmsprop(learning_rate, model_l, [xr, y])
-    f_update_b = rmsprop(learning_rate, model_l, [xl, xr, y])
+    f_update_r = rmsprop(learning_rate, model_r, [xr, y])
+    f_update_b = rmsprop(learning_rate, model_b, [xl, xr, y])
 
     # compile validation/test functions
-    f_valid_l = theano.function([xl, y], [model_l[0], model_l[1]])
-    f_valid_r = theano.function([xl, y], [model_r[0], model_r[1]])
-    f_valid_b = theano.function([xl, y], [model_b[0], model_b[1]])
+    f_valid_l = theano.function([xl, y], [model_l.cost, model_l.acc])
+    f_valid_r = theano.function([xr, y], [model_r.cost, model_r.acc])
+    f_valid_b = theano.function([xl, xr, y], [model_b.cost, model_b.acc])
 
     # training loop
     train_err, valid_err, test_err = train(

@@ -43,6 +43,31 @@ class DropoutLayer(object):
         return x
 
 
+class Sequence(object):
+    def __init__(self, layers=None):
+        self.layers = layers
+        if layers is None:
+            self.layers = list()
+
+    def fprop(self, inp, **kwargs):
+        z = inp
+        for i, layer in enumerate(self.layers):
+            z = layer(z, **kwargs)
+        return z
+
+    def get_params(self):
+        params = []
+        for layer in self.layers:
+            params += layer.get_params()
+        return params
+
+    def add(self, layer):
+        if isinstance(layer, list):
+            self.layers += layer
+        else:
+            self.layers.append(layer)
+
+
 class DenseLayer(object):
     def __init__(self, nin, dim, activ='lambda x: tensor.tanh(x)', prefix='ff',
                  postfix='0', scale=0.01, ortho=False, add_bias=True,
@@ -54,6 +79,7 @@ class DenseLayer(object):
         if add_bias:
             self.b = init_bias(dim, _p(prefix, 'b', postfix))
 
+        self.dropout_layer = None
         if dropout > 0.:
             self.dropout_layer = DropoutLayer(dropout, trng)
 
@@ -61,12 +87,15 @@ class DenseLayer(object):
         pre_act = tensor.dot(state_below, self.W) + \
             (self.b if self.add_bias else 0.)
         z = eval(self.activ)(pre_act)
-        if self.use_noise:
-            z = self.dropout_layer(z)
+        if use_noise and self.dropout_layer is not None:
+            z = self.dropout_layer.fprop(z)
         return z
 
     def get_params(self):
-        return [self.W] + ([self.b] if self.add_bias else [])
+        params = {self.W.name: self.W}
+        if self.add_bias:
+            params[self.b.name] = self.b
+        return params
 
 
 class MultiLayer(object):
@@ -76,27 +105,27 @@ class MultiLayer(object):
             self.layers.append(DenseLayer(nin, dim, postfix=i, **kwargs))
             nin = dim
 
-    def fprop(self, inp):
+    def fprop(self, inp, **kwargs):
         for i, layer in enumerate(self.layers):
-            inp = layer.fprop(inp)
+            inp = layer.fprop(inp, **kwargs)
         return inp
 
     def get_params(self):
-        params = []
+        params = {}
         for layer in self.layers:
-            params += layer.get_params()
+            params.update(**layer.get_params())
         return params
 
 
 class Merger(object):
     def __init__(self, dims):
         self.dims = dims
-        self.params = []
+        self.params = {}
 
     def fprop(self, inps, *args, **kwargs):
         return self._merge(inps, *args, **kwargs)
 
-    def _merge(self, inps, axis=0, op='sum'):
+    def _merge(self, inps, axis=0, op='sum', **kwargs):
         if op == 'sum':
             merged = inps[0]
             for i in range(1, len(inps)):

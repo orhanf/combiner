@@ -4,7 +4,16 @@ import theano
 from theano import tensor
 
 
-def rmsprop(lr, tparams, grads, inp, cost):
+class Model(object):
+    def __init__(self, **kwargs):
+        self.__dict__.update(**kwargs)
+
+
+def rmsprop(lr, model, inp):
+    tparams = model.params
+    cost = model.cost
+    grads = model.grads
+
     zipped_grads = [theano.shared(p.get_value() * np.float32(0.),
                                   name='%s_grad' % k)
                     for k, p in tparams.iteritems()]
@@ -26,7 +35,7 @@ def rmsprop(lr, tparams, grads, inp, cost):
     updir_new = [(ud, 0.9 * ud - 1e-4 * zg / tensor.sqrt(rg2 - rg ** 2 + 1e-4))
                  for ud, zg, rg, rg2 in zip(updir, zipped_grads, running_grads,
                                             running_grads2)]
-    param_up = [(p, p + udn[1]) for p, udn in zip(tparams, updir_new)]
+    param_up = [(p, p + udn[1]) for p, udn in zip(tparams.values(), updir_new)]
     f_update = theano.function(
         inputs=[lr] + inp, outputs=cost,
         updates=zgup+rgup+rg2up+updir_new+param_up,

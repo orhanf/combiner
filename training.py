@@ -1,6 +1,9 @@
+import logging
 import time
 
 from data_iterator import load_dataset, iterate_minibatches
+
+logger = logging.getLogger(__name__)
 
 
 def train(f_train_l, f_train_r, f_train_b,
@@ -10,10 +13,9 @@ def train(f_train_l, f_train_r, f_train_b,
     # load data
     X_train, y_train, X_val, y_val, X_test, y_test = load_dataset()
 
-    print("Starting training...")
-    # We iterate over epochs:
+    logger.info("Starting training...")
     for epoch in range(num_epochs):
-        # In each epoch, we do a full pass over the training data:
+
         train_err_l = 0
         train_err_r = 0
         train_err_b = 0

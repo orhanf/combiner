@@ -3,7 +3,7 @@ from theano import tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 from layers import MultiLayer, Merger
-from optimizer import Model, rmsprop
+from optimizer import Model, get_optimizer
 from training import train
 
 floatX = theano.config.floatX
@@ -98,7 +98,8 @@ options = {
     'lbranch': {'dropout': 0.2, 'prefix': 'left'},
     'rbranch': {'dropout': 0.2, 'prefix': 'right'},
     'tbranch': {'prefix': 'top'},
-    'lr': 1.,
+    'lr': .001,
+    'optimizer': 'uAdam',
     'num_epochs': 100
 }
 
@@ -128,9 +129,10 @@ def main():
         **options)
 
     # compile
-    f_train_l = rmsprop(learning_rate, model_l, [xl, y])
-    f_train_r = rmsprop(learning_rate, model_r, [xr, y])
-    f_train_b = rmsprop(learning_rate, model_b, [xl, xr, y])
+    opt = get_optimizer(options['optimizer'])
+    f_train_l = opt(learning_rate, model_l, [xl, y])
+    f_train_r = opt(learning_rate, model_r, [xr, y])
+    f_train_b = opt(learning_rate, model_b, [xl, xr, y])
 
     # compile validation/test functions
     f_valid_l = theano.function([xl, y], [model_l.cost, model_l.acc])

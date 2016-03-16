@@ -9,6 +9,10 @@ class Model(object):
         self.__dict__.update(**kwargs)
 
 
+def get_optimizer(opt_name):
+    return eval(opt_name)
+
+
 def rmsprop(lr, model, inp):
     tparams = model.params
     cost = model.cost
@@ -41,4 +45,50 @@ def rmsprop(lr, model, inp):
         updates=zgup+rgup+rg2up+updir_new+param_up,
         on_unused_input='ignore')
 
+    return f_update
+
+
+def uAdam(lr, model, inp, b1=0.9, b2=0.999, e=1e-8):
+    tparams = model.params
+    cost = model.cost
+    grads = model.grads
+
+    gshared = [theano.shared(p.get_value() * 0.,
+                             name='%s_grad' % k)
+               for k, p in tparams.iteritems()]
+    gsup = [(gs, g) for gs, g in zip(gshared, grads)]
+
+    updates = []
+    step_rule_updates = []
+
+    i = theano.shared(np.float32(0.), 'time')
+    i_t = i + 1.
+    fix1 = b1**(i_t)
+    fix2 = b2**(i_t)
+    lr_t = lr * (tensor.sqrt(1 - fix2) / (1 - fix1))
+
+    for p, g in zip(tparams.values(), gshared):
+        m = theano.shared(p.get_value() * 0., p.name + '_mean')
+        v = theano.shared(p.get_value() * 0., p.name + '_variance')
+
+        m_t = b1 * m + (1. - b1) * g
+        v_t = b2 * v + (1. - b2) * g**2
+        m_t_hat = m_t / (1 - fix1)
+        v_t_hat = v_t / (1 - fix2)
+        g_t = lr_t * m_t_hat / (tensor.sqrt(v_t_hat) + e)
+        p_t = p - g_t
+
+        updates.append((m, m_t))
+        updates.append((v, v_t))
+        updates.append((p, p_t))
+        step_rule_updates.append(m)
+        step_rule_updates.append(v)
+
+    updates.append((i, i_t))
+    step_rule_updates.append(i)
+
+    f_update = theano.function(
+        inputs=[lr] + inp, outputs=cost,
+        updates=gsup+updates,
+        on_unused_input='ignore')
     return f_update

@@ -95,10 +95,10 @@ options = {
     'rlayer_dims': [512],
     'tlayer_dims': [512, 10],
     'merged_layer_dim': 512,
-    'lbranch': {'dropout': 0.2, 'prefix': 'left'},
-    'rbranch': {'dropout': 0.2, 'prefix': 'right'},
-    'tbranch': {'prefix': 'top'},
-    'lr': .001,
+    'lbranch': {'dropout': [0.2], 'prefix': 'left'},
+    'rbranch': {'dropout': [0.2], 'prefix': 'right'},
+    'tbranch': {'dropout': [0.2, None], 'prefix': 'top'},
+    'lr': .0001,
     'optimizer': 'uAdam',
     'num_epochs': 100
 }

@@ -80,7 +80,7 @@ class DenseLayer(object):
             self.b = init_bias(dim, _p(prefix, 'b', postfix))
 
         self.dropout_layer = None
-        if dropout > 0.:
+        if dropout > 0. and dropout is not None:
             self.dropout_layer = DropoutLayer(dropout, trng)
 
     def fprop(self, state_below, use_noise=False):
@@ -99,10 +99,13 @@ class DenseLayer(object):
 
 
 class MultiLayer(object):
-    def __init__(self, nin, dims, **kwargs):
+    def __init__(self, nin, dims, dropout=None, **kwargs):
+        if dropout is None:
+            dropout = [None for _ in range(len(dims))]
         self.layers = []
         for i, dim in enumerate(dims):
-            self.layers.append(DenseLayer(nin, dim, postfix=i, **kwargs))
+            self.layers.append(
+                DenseLayer(nin, dim, postfix=i, dropout=dropout[i], **kwargs))
             nin = dim
 
     def fprop(self, inp, **kwargs):

@@ -1,4 +1,3 @@
-import logging
 import theano
 from theano import tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
@@ -8,7 +7,6 @@ from optimizer import Model, rmsprop
 from training import train
 
 floatX = theano.config.floatX
-logger = logging.getLogger(__name__)
 
 
 def merge_dicts(*dict_args):
@@ -22,7 +20,7 @@ def build_model(xl, xr, y, learning_rate, linput_dim, rinput_dim, llayer_dims,
                 rlayer_dims, tlayer_dims, merged_layer_dim=None, lbranch=None,
                 rbranch=None, tbranch=None, trng=None, **kwargs):
 
-    logger.info('Building model')
+    print('Building training model')
     f_l = MultiLayer(linput_dim, llayer_dims, trng=trng, **lbranch)  # left
     f_r = MultiLayer(rinput_dim, rlayer_dims, trng=trng, **rbranch)  # right
     f_t = MultiLayer(merged_layer_dim, tlayer_dims, trng=trng, **tbranch)
@@ -58,14 +56,26 @@ def build_model(xl, xr, y, learning_rate, linput_dim, rinput_dim, llayer_dims,
                            f_t.get_params(),
                            merger.get_params())
 
-    logger.info('Computing gradients')
+    print('Computing gradients')
     grads_l = [theano.grad(cost_l, p) for k, p in params_l.items()]
     grads_r = [theano.grad(cost_r, p) for k, p in params_r.items()]
     grads_b = [theano.grad(cost_b, p) for k, p in params_b.items()]
 
-    acc_l = T.mean(T.eq(T.argmax(yl_probs, axis=1), y), dtype=floatX)
-    acc_r = T.mean(T.eq(T.argmax(yr_probs, axis=1), y), dtype=floatX)
-    acc_b = T.mean(T.eq(T.argmax(yb_probs, axis=1), y), dtype=floatX)
+    print('Building validation model')
+    fl = f_l.fprop(xl, use_noise=False)
+    fr = f_r.fprop(xr, use_noise=False)
+
+    fl_only = merger.fprop([fl], use_noise=False)
+    fr_only = merger.fprop([fr], use_noise=False)
+    f_both = merger.fprop([fl, fr], op='sum', axis=1, use_noise=False)
+
+    yl_probs_val = T.nnet.softmax(f_t.fprop(fl_only, use_noise=False))
+    yr_probs_val = T.nnet.softmax(f_t.fprop(fr_only, use_noise=False))
+    yb_probs_val = T.nnet.softmax(f_t.fprop(f_both, use_noise=False))
+
+    acc_l = T.mean(T.eq(T.argmax(yl_probs_val, axis=1), y), dtype=floatX)
+    acc_r = T.mean(T.eq(T.argmax(yr_probs_val, axis=1), y), dtype=floatX)
+    acc_b = T.mean(T.eq(T.argmax(yb_probs_val, axis=1), y), dtype=floatX)
 
     model_l = Model(cost=cost_l, params=params_l, grads=grads_l, acc=acc_l)
     model_r = Model(cost=cost_r, params=params_r, grads=grads_r, acc=acc_r)
@@ -75,17 +85,21 @@ def build_model(xl, xr, y, learning_rate, linput_dim, rinput_dim, llayer_dims,
 
 
 options = {
-    'batch_size': 128,
+    'lbatch_sz': 128,
+    'rbatch_sz': 128,
+    'bbatch_sz': 128,
     'nb_classes': 10,
     'linput_dim': 392,
     'rinput_dim': 392,
     'llayer_dims': [512],
     'rlayer_dims': [512],
-    'tlayer_dims': [10],
+    'tlayer_dims': [512, 10],
     'merged_layer_dim': 512,
     'lbranch': {'dropout': 0.2, 'prefix': 'left'},
     'rbranch': {'dropout': 0.2, 'prefix': 'right'},
-    'tbranch': {'prefix': 'top'}
+    'tbranch': {'prefix': 'top'},
+    'lr': 1.,
+    'num_epochs': 100
 }
 
 
@@ -95,7 +109,7 @@ def main():
     xr = T.matrix('xr')
     y = T.ivector('y')
     learning_rate = T.scalar('learning_rate')
-    trng = RandomStreams(1234)
+    trng = RandomStreams(4321)
 
     # use test values
     """
@@ -114,9 +128,9 @@ def main():
         **options)
 
     # compile
-    f_update_l = rmsprop(learning_rate, model_l, [xl, y])
-    f_update_r = rmsprop(learning_rate, model_r, [xr, y])
-    f_update_b = rmsprop(learning_rate, model_b, [xl, xr, y])
+    f_train_l = rmsprop(learning_rate, model_l, [xl, y])
+    f_train_r = rmsprop(learning_rate, model_r, [xr, y])
+    f_train_b = rmsprop(learning_rate, model_b, [xl, xr, y])
 
     # compile validation/test functions
     f_valid_l = theano.function([xl, y], [model_l.cost, model_l.acc])
@@ -124,10 +138,8 @@ def main():
     f_valid_b = theano.function([xl, xr, y], [model_b.cost, model_b.acc])
 
     # training loop
-    train_err, valid_err, test_err = train(
-        f_update_l, f_update_r, f_update_b,
-        f_valid_l, f_valid_r, f_valid_b,
-        xl, xr, y, learning_rate)
+    train(f_train_l, f_train_r, f_train_b, f_valid_l, f_valid_r, f_valid_b,
+          xl, xr, y, **options)
 
 if __name__ == "__main__":
     main()

@@ -81,4 +81,8 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
             excerpt = indices[start_idx:start_idx + batchsize]
         else:
             excerpt = slice(start_idx, start_idx + batchsize)
-        yield inputs[excerpt], targets[excerpt]
+
+        # top and bottom halves
+        yield (inputs[excerpt, :, :14, :].reshape((batchsize, -1)),
+               inputs[excerpt, :, 14:, :].reshape((batchsize, -1)),
+               targets[excerpt])

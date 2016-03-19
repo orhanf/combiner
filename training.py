@@ -1,3 +1,4 @@
+import numpy
 import time
 
 from data_iterator import load_dataset, iterate_minibatches
@@ -19,13 +20,16 @@ def train(f_train_l, f_train_r, f_train_b,
         train_err_r = 0
         train_err_b = 0
         tr_batches = 0
+        alphas = []
         start_time = time.time()
         for lbatch, rbatch, bbatch in zip(
                 iterate_minibatches(X_train, y_train, lbatch_sz, shuffle=True),
                 iterate_minibatches(X_train, y_train, rbatch_sz, shuffle=True),
                 iterate_minibatches(X_train, y_train, bbatch_sz, shuffle=True)
                 ):
-            train_err_b += f_train_b(lr, bbatch[0], bbatch[1], bbatch[2])
+            _train_err_b, alpha = f_train_b(lr, bbatch[0], bbatch[1], bbatch[2])
+            train_err_b += _train_err_b
+            alphas.append(alpha)
             train_err_r += f_train_r(lr, rbatch[1], rbatch[2])
             train_err_l += f_train_l(lr, lbatch[0], lbatch[2])
             tr_batches += 1
@@ -56,14 +60,15 @@ def train(f_train_l, f_train_r, f_train_b,
         print(("Epoch {:>4} of {} took {:.3f}s" +
                "  train_loss - l:[{:.6f}] r:[{:.6f}] b:[{:.6f}] " +
                "  valid_loss - l:[{:.6f}] r:[{:.6f}] b:[{:.6f}] " +
-               "  valid_acc - l:[{:.2f} %] r:[{:.2f} %] b:[{:.2f} %]").format(
+               "  valid_acc - l:[{:.2f} %] r:[{:.2f} %] b:[{:.2f} %] alphas:[{}]").format(
             epoch + 1, num_epochs, time.time() - start_time,
             train_err_l / tr_batches, train_err_r / tr_batches,
             train_err_b / tr_batches, lval_err / val_batches,
             rval_err / val_batches, bval_err / val_batches,
             lval_acc / val_batches * 100,
             rval_acc / val_batches * 100,
-            bval_acc / val_batches * 100))
+            bval_acc / val_batches * 100,
+            (numpy.vstack([aa.mean(1) for aa in alphas]).mean(0))))
 
     # After training, we compute and print the test error:
     ltest_err = 0

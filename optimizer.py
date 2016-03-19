@@ -48,7 +48,7 @@ def rmsprop(lr, model, inp):
     return f_update
 
 
-def uAdam(lr, model, inp, b1=0.9, b2=0.999, e=1e-8):
+def uAdam(lr, model, inp, b1=0.9, b2=0.999, e=1e-8, return_alpha=False):
     tparams = model.params
     cost = model.cost
     grads = model.grads
@@ -87,8 +87,12 @@ def uAdam(lr, model, inp, b1=0.9, b2=0.999, e=1e-8):
     updates.append((i, i_t))
     step_rule_updates.append(i)
 
+    outputs = cost
+    if return_alpha:
+        outputs = [cost, model.alpha]
+
     f_update = theano.function(
-        inputs=[lr] + inp, outputs=cost,
+        inputs=[lr] + inp, outputs=outputs,
         updates=gsup+updates,
         on_unused_input='ignore')
     return f_update

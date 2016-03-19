@@ -21,21 +21,26 @@ def build_model(xl, xr, y, learning_rate, linput_dim, rinput_dim, llayer_dims,
                 rbranch=None, tbranch=None, trng=None, **kwargs):
 
     print('Building training model')
+    use_noise = True
+    alpha = None
+    op = 'weighted-sum'
     f_l = MultiLayer(linput_dim, llayer_dims, trng=trng, **lbranch)  # left
     f_r = MultiLayer(rinput_dim, rlayer_dims, trng=trng, **rbranch)  # right
     f_t = MultiLayer(merged_layer_dim, tlayer_dims, trng=trng, **tbranch)
-    merger = Merger(merged_layer_dim)  # merger layer
+    merger = Merger(merged_layer_dim, op=op)  # merger layer
 
-    fl = f_l.fprop(xl, use_noise=True)
-    fr = f_r.fprop(xr, use_noise=True)
+    fl = f_l.fprop(xl, use_noise=use_noise)
+    fr = f_r.fprop(xr, use_noise=use_noise)
 
-    fl_only = merger.fprop([fl], use_noise=True)
-    fr_only = merger.fprop([fr], use_noise=True)
-    f_both = merger.fprop([fl, fr], op='sum', axis=1, use_noise=True)
+    fl_only = merger.fprop([fl], use_noise=use_noise)
+    fr_only = merger.fprop([fr], use_noise=use_noise)
+    f_both = merger.fprop([fl, fr], axis=1, use_noise=use_noise)
+    if op == 'weighted-sum':
+        f_both, alpha = f_both
 
-    yl_probs = T.nnet.softmax(f_t.fprop(fl_only, use_noise=True))
-    yr_probs = T.nnet.softmax(f_t.fprop(fr_only, use_noise=True))
-    yb_probs = T.nnet.softmax(f_t.fprop(f_both, use_noise=True))
+    yl_probs = T.nnet.softmax(f_t.fprop(fl_only, use_noise=use_noise))
+    yr_probs = T.nnet.softmax(f_t.fprop(fr_only, use_noise=use_noise))
+    yb_probs = T.nnet.softmax(f_t.fprop(f_both, use_noise=use_noise))
 
     cost_l = T.nnet.categorical_crossentropy(yl_probs, y).mean()
     cost_r = T.nnet.categorical_crossentropy(yr_probs, y).mean()
@@ -46,11 +51,9 @@ def build_model(xl, xr, y, learning_rate, linput_dim, rinput_dim, llayer_dims,
     cost_b.name = 'cost_b'
 
     params_l = merge_dicts(f_l.get_params(),
-                           f_t.get_params(),
-                           merger.get_params())
+                           f_t.get_params())
     params_r = merge_dicts(f_r.get_params(),
-                           f_t.get_params(),
-                           merger.get_params())
+                           f_t.get_params())
     params_b = merge_dicts(f_l.get_params(),
                            f_r.get_params(),
                            f_t.get_params(),
@@ -68,6 +71,8 @@ def build_model(xl, xr, y, learning_rate, linput_dim, rinput_dim, llayer_dims,
     fl_only = merger.fprop([fl], use_noise=False)
     fr_only = merger.fprop([fr], use_noise=False)
     f_both = merger.fprop([fl, fr], op='sum', axis=1, use_noise=False)
+    if op == 'weighted-sum':
+        f_both, alpha_val = f_both
 
     yl_probs_val = T.nnet.softmax(f_t.fprop(fl_only, use_noise=False))
     yr_probs_val = T.nnet.softmax(f_t.fprop(fr_only, use_noise=False))
@@ -77,9 +82,9 @@ def build_model(xl, xr, y, learning_rate, linput_dim, rinput_dim, llayer_dims,
     acc_r = T.mean(T.eq(T.argmax(yr_probs_val, axis=1), y), dtype=floatX)
     acc_b = T.mean(T.eq(T.argmax(yb_probs_val, axis=1), y), dtype=floatX)
 
-    model_l = Model(cost=cost_l, params=params_l, grads=grads_l, acc=acc_l)
-    model_r = Model(cost=cost_r, params=params_r, grads=grads_r, acc=acc_r)
-    model_b = Model(cost=cost_b, params=params_b, grads=grads_b, acc=acc_b)
+    model_l = Model(cost=cost_l, params=params_l, grads=grads_l, acc=acc_l, alpha=alpha)
+    model_r = Model(cost=cost_r, params=params_r, grads=grads_r, acc=acc_r, alpha=alpha)
+    model_b = Model(cost=cost_b, params=params_b, grads=grads_b, acc=acc_b, alpha=alpha)
 
     return model_l, model_r, model_b
 
@@ -91,16 +96,16 @@ options = {
     'nb_classes': 10,
     'linput_dim': 392,
     'rinput_dim': 392,
-    'llayer_dims': [512],
-    'rlayer_dims': [512],
+    'llayer_dims': [512, 512],
+    'rlayer_dims': [512, 512],
     'tlayer_dims': [512, 10],
     'merged_layer_dim': 512,
-    'lbranch': {'dropout': [0.2], 'prefix': 'left'},
-    'rbranch': {'dropout': [0.2], 'prefix': 'right'},
-    'tbranch': {'dropout': [0.2, None], 'prefix': 'top'},
+    'lbranch': {'dropout': [0.5, 0.2], 'activ': ['relu', 'relu'], 'prefix': 'left'},
+    'rbranch': {'dropout': [0.5, 0.2], 'activ': ['relu', 'relu'], 'prefix': 'right'},
+    'tbranch': {'dropout': [0.2, None], 'activ': ['relu', 'linear'], 'prefix': 'top'},
     'lr': .0001,
     'optimizer': 'uAdam',
-    'num_epochs': 100
+    'num_epochs': 200
 }
 
 
@@ -132,7 +137,7 @@ def main():
     opt = get_optimizer(options['optimizer'])
     f_train_l = opt(learning_rate, model_l, [xl, y])
     f_train_r = opt(learning_rate, model_r, [xr, y])
-    f_train_b = opt(learning_rate, model_b, [xl, xr, y])
+    f_train_b = opt(learning_rate, model_b, [xl, xr, y], return_alpha=True)
 
     # compile validation/test functions
     f_valid_l = theano.function([xl, y], [model_l.cost, model_l.acc])

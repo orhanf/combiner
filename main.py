@@ -82,8 +82,8 @@ def build_model(xl, xr, y, learning_rate, linput_dim, rinput_dim, llayer_dims,
     acc_r = T.mean(T.eq(T.argmax(yr_probs_val, axis=1), y), dtype=floatX)
     acc_b = T.mean(T.eq(T.argmax(yb_probs_val, axis=1), y), dtype=floatX)
 
-    model_l = Model(cost=cost_l, params=params_l, grads=grads_l, acc=acc_l, alpha=alpha)
-    model_r = Model(cost=cost_r, params=params_r, grads=grads_r, acc=acc_r, alpha=alpha)
+    model_l = Model(cost=cost_l, params=params_l, grads=grads_l, acc=acc_l)
+    model_r = Model(cost=cost_r, params=params_r, grads=grads_r, acc=acc_r)
     model_b = Model(cost=cost_b, params=params_b, grads=grads_b, acc=acc_b, alpha=alpha)
 
     return model_l, model_r, model_b

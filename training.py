@@ -8,6 +8,7 @@ def train(f_train_l, f_train_r, f_train_b,
           f_valid_l, f_valid_r, f_valid_b,
           xl, xr, y, lr=1., num_epochs=20,
           lbatch_sz=128, rbatch_sz=128, bbatch_sz=128,
+          op='weighted-sum'
           **kwargs):
 
     # load data

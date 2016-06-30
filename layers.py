@@ -129,6 +129,29 @@ class MultiLayer(object):
         return params
 
 
+class TreeLayer(object):
+    def __init__(self, dims, prefix='tree', **kwargs):
+        self.dims = dims
+        self.W = init_param(dim, name=_p(prefix, 'W', 0))
+        self.b = init_bias(dim, name=_p(prefix, 'b', 0))
+        self.params = [self.U, self.W, self.b]
+
+    def fprop(self, inps, **kwargs):
+        if len(inps) == 1:
+            return inps[0]
+        tbd = tensor.stack(inps)  # time x batch x dim
+        ptbd = tensor.dot(tbd, self.W) + self.b
+        alpha = tensor.dot(ptbd, self.U)
+        alpha = alpha.reshape([alpha.shape[0], alpha.shape[1]])
+        alpha = tensor.exp(alpha)
+        alpha = alpha / alpha.sum(0, keepdims=True)
+        wa = (tbd * alpha[:, :, None]).sum(0)  # weighted average
+        return wa, alpha
+
+    def get_params(self):
+        return {p.name: p for p in self.params}
+
+
 class AttentionLayer(object):
     def __init__(self, dim, att_dim=100, prefix='att', **kwargs):
         self.dim = dim

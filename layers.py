@@ -154,6 +154,29 @@ class AttentionLayer(object):
         return {p.name: p for p in self.params}
 
 
+class TreeLayer(object):
+    def __init__(self, dims, prefix='tree', **kwargs):
+        self.dims = dims
+        self.W = init_param(dim, name=_p(prefix, 'W', 0))
+        self.b = init_bias(dim, name=_p(prefix, 'b', 0))
+        self.params = [self.U, self.W, self.b]
+
+    def fprop(self, inps, **kwargs):
+        if len(inps) == 1:
+            return inps[0]
+        tbd = tensor.stack(inps)  # time x batch x dim
+        ptbd = tensor.dot(tbd, self.W) + self.b
+        alpha = tensor.dot(ptbd, self.U)
+        alpha = alpha.reshape([alpha.shape[0], alpha.shape[1]])
+        alpha = tensor.exp(alpha)
+        alpha = alpha / alpha.sum(0, keepdims=True)
+        wa = (tbd * alpha[:, :, None]).sum(0)  # weighted average
+        return wa, alpha
+
+    def get_params(self):
+        return {p.name: p for p in self.params}
+
+
 class Merger(object):
     def __init__(self, dims, op='sum', **kwargs):
         self.dims = dims
@@ -164,7 +187,7 @@ class Merger(object):
             self.mlp = AttentionLayer(dims, prefix='att', **kwargs)
             self.params.update(self.mlp.get_params())
         elif op == 'weighted-sum':
-            self.mlp = Fork(dims, prefix='fork', **kwargs)
+            self.mlp = TreeLayer(dims, prefix='tree', **kwargs)
             self.params.update(self.mlp.get_params())
 
     def fprop(self, inps, *args, **kwargs):
